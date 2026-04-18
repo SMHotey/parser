@@ -49,10 +49,12 @@ class VisualSelectorWidget(QWidget):
 
     element_selected = pyqtSignal(str)
 
-    def __init__(self, html_content, base_url, parent=None):
+    def __init__(self, url, base_url=None, parent=None):
         super().__init__(parent)
-        self.html_content = html_content
-        self.base_url = base_url
+        # Принимаем URL напрямую для загрузки
+        self.url = url
+        self.base_url = base_url or url
+        self.html_content = None
         self.bridge = None
         self.channel = None
         self.init_ui()
@@ -65,7 +67,8 @@ class VisualSelectorWidget(QWidget):
         instruction = QLabel(
             "🖱️ НАВЕДИТЕ на элемент для подсветки\n"
             "👆 НАЖМИТЕ на элемент, чтобы скопировать его селектор\n"
-            "📋 Селектор автоматически скопируется в буфер обмена"
+            "📋 Селектор автоматически скопируется в буфер обмена\n"
+            "🚫 Нажмите ESC для отмены выбора"
         )
         instruction.setStyleSheet("""
             background-color: #4a4a4a; 
@@ -116,29 +119,115 @@ class VisualSelectorWidget(QWidget):
 
         # Подключаем сигналы для отладки
         page.loadFinished.connect(self.on_page_loaded)
+        page.loadStarted.connect(self.on_page_started)
 
-        # Загружаем HTML с JavaScript для выбора элементов
-        self.load_html_with_selector()
+        # Загружаем URL напрямую!
+        logger.info(f"Loading URL: {self.url}")
+        self.web_view.setUrl(QUrl(self.url))
 
         layout.addWidget(self.web_view)
         self.setLayout(layout)
 
+    def on_page_started(self):
+        logger.debug("Page started loading")
+
     def on_page_loaded(self, ok):
         """Вызывается после загрузки страницы."""
         if ok:
-            logger.debug("Page loaded successfully")
-            # Дополнительно внедряем JavaScript для проверки
-            self.web_view.page().runJavaScript("""
-                console.log('Page loaded, checking bridge...');
-                if (window.bridge) {
-                    console.log('Bridge is available');
-                    window.bridge.onElementSelected('test');
-                } else {
-                    console.log('Bridge is NOT available');
-                }
-            """)
+            logger.debug("Page loaded successfully, injecting selector JS...")
+            # Внедряем JavaScript для выбора элементов ПОСЛЕ загрузки страницы!
+            self.inject_selector_js()
         else:
             logger.error("Page failed to load")
+
+    def inject_selector_js(self):
+        """Внедряет JavaScript код для выбора элементов."""
+        js_code = r"""
+        (function() {
+            // Создаем элемент для подсказки
+            var tooltip = document.createElement('div');
+            tooltip.id = 'selector-tooltip';
+            tooltip.style.cssText = 'position:fixed; background:#333; color:#fff; padding:5px 10px; border-radius:3px; font-family:monospace; font-size:12px; z-index:99999; pointer-events:none; display:none;';
+            document.body.appendChild(tooltip);
+
+            // Функция для получения уникального CSS селектора
+            function getUniqueSelector(el) {
+                if (el.id) return '#' + el.id;
+                
+                var path = [];
+                while (el.nodeType === Node.ELEMENT_NODE) {
+                    var selector = el.tagName.toLowerCase();
+                    if (el.id) {
+                        selector = '#' + el.id;
+                        path.unshift(selector);
+                        break;
+                    } else if (el.className && typeof el.className === 'string') {
+                        var classes = el.className.trim().split(/\s+/).filter(function(c) { 
+                            return c && !c.match(/^[0-9]/) && !c.includes(':');
+                        });
+                        if (classes.length > 0) {
+                            selector += '.' + classes.join('.');
+                        }
+                    }
+                    
+                    var sibling = el.parentNode ? el.parentNode.firstChild : null;
+                    var sibIndex = 1;
+                    while (sibling) {
+                        if (sibling === el) break;
+                        if (sibling.nodeType === Node.ELEMENT_NODE && sibling.tagName === el.tagName) {
+                            sibIndex++;
+                        }
+                        sibling = sibling.nextSibling;
+                    }
+                    if (sibIndex > 1) {
+                        selector += ':nth-of-type(' + sibIndex + ')';
+                    }
+                    
+                    path.unshift(selector);
+                    el = el.parentNode;
+                    if (el.tagName === 'BODY' || el.tagName === 'HTML') break;
+                }
+                return path.join(' > ');
+            }
+
+            // Перехватываем клики
+            document.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                var selector = getUniqueSelector(e.target);
+                console.log('Selected:', selector);
+
+                // Копируем в буфер
+                var textarea = document.createElement('textarea');
+                textarea.value = selector;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+
+                // Показываем уведомление
+                var notification = document.createElement('div');
+                notification.textContent = '✓ Селектор скопирован: ' + selector;
+                notification.style.cssText = 'position:fixed; top:20px; right:20px; background:#4CAF50; color:white; padding:15px 25px; border-radius:4px; z-index:99999; font-family:monospace; font-size:14px; font-weight:bold;';
+                document.body.appendChild(notification);
+                setTimeout(function() { notification.remove(); }, 3000);
+            }, true);
+
+            // Подсветка при наведении
+            document.addEventListener('mouseover', function(e) {
+                e.target.style.outline = '2px solid #ff4444';
+            }, true);
+
+            document.addEventListener('mouseout', function(e) {
+                e.target.style.outline = '';
+            }, true);
+
+            console.log('Selector JS injected!');
+        })();
+        """
+        self.web_view.page().runJavaScript(js_code)
+        logger.debug("Selector JS injected")
 
     def load_html_with_selector(self):
         """Загружает HTML с внедренным JavaScript для выбора элементов."""
@@ -1049,9 +1138,9 @@ class SelectorFinder(QWidget):
             if self.windowIcon():
                 self.visual_window.setWindowIcon(self.windowIcon())
 
-            # Создаем виджет визуального выбора
+            # Создаем виджет визуального выбора с URL!
             visual_widget = VisualSelectorWidget(
-                self.response.text,
+                self.current_url,
                 self.current_url,
                 self.visual_window
             )

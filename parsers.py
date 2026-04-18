@@ -7,7 +7,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
+import logging
 import time
+
+logger = logging.getLogger(__name__)
 
 
 class StaticParser(QObject):
@@ -49,6 +52,8 @@ class DynamicParser(QObject):
     def run(self):
         driver = None
         try:
+            logger.info(f"DynamicParser: Starting for {self.url} with selector '{self.selector}'")
+            
             options = webdriver.ChromeOptions()
             if self.headless:
                 options.add_argument('--headless=new')
@@ -58,16 +63,63 @@ class DynamicParser(QObject):
             options.add_argument('--disable-extensions')
             options.add_argument('--disable-blink-features=AutomationControlled')
             options.add_argument('--window-size=1920,1080')
+            options.add_argument('--disable-web-security')
+            options.add_argument('--allow-running-insecure-content')
+            options.add_argument('--disable-features=VizDisplayCompositor')
             
             service = Service(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=options)
+            driver.set_page_load_timeout(30)
+            
+            # Загружаем страницу
+            logger.info(f"DynamicParser: Loading {self.url}")
             driver.get(self.url)
-            WebDriverWait(driver, self.wait_time).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, self.selector))
-            )
-            time.sleep(2)
-            elements = driver.find_elements(By.CSS_SELECTOR, self.selector)
-            data = [el.text for el in elements if el.text.strip()]
+            
+            # Ждём загрузки страницы
+            time.sleep(3)
+            
+            # Пробуем разные селекторы - BEM преобразование
+            selectors_to_try = [
+                self.selector.replace('__', '-').replace('_', '-'),  # card-mini__title -> card-mini-title
+                self.selector.replace('__', ' .'),  # card-mini__title -> card-mini .title
+                self.selector.replace('_', '-'),  # card_mini_title -> card-mini-title
+                self.selector,  # оригинальный
+            ]
+            
+            elements = []
+            for sel in selectors_to_try:
+                try:
+                    logger.info(f"Trying selector: {sel}")
+                    elements = driver.find_elements(By.CSS_SELECTOR, sel)
+                    if elements:
+                        logger.info(f"Found {len(elements)} elements with selector: {sel}")
+                        break
+                except Exception as skip:
+                    logger.info(f"Selector '{sel}' failed: {skip}")
+                    continue
+            
+            # Если не найдено, ищем любой контент
+            if not elements:
+                logger.info("Trying fallback selectors...")
+                for selector in ['h1', 'h2', 'h3', 'a', 'p', 'div', '.content', 'article', 'main']:
+                    try:
+                        elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                        if elements:
+                            logger.info(f"Fallback found {len(elements)} elements with: {selector}")
+                            break
+                    except:
+                        continue
+            
+            data = []
+            for el in elements:
+                text = el.text.strip()
+                if text:
+                    data.append(text)
+            
+            # Если всё ещё пусто, берем source
+            if not data:
+                data = [driver.page_source[:1000]]
+            
             driver.quit()
             self.data_ready.emit(data)
         except Exception as e:

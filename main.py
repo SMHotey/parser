@@ -271,82 +271,99 @@ class MainWindow(QMainWindow):
 
     def refresh_profiles_list(self):
         """Обновляет список профилей."""
-        self.profiles_list.clear()
-        for profile in self.profile_manager.get_profiles_list():
-            self.profiles_list.addItem(profile)
+        try:
+            self.profiles_list.clear()
+            for profile in self.profile_manager.get_profiles_list():
+                self.profiles_list.addItem(profile)
+        except Exception as e:
+            print(f"Error refreshing profiles: {e}")
 
     def on_profile_selected(self, item):
         """Показывает детали выбранного профиля."""
-        profile = self.profile_manager.load_profile(item.text())
-        if profile:
-            self.profile_details.setText(json.dumps(profile, ensure_ascii=False, indent=2))
+        try:
+            if not item:
+                return
+            profile = self.profile_manager.load_profile(item.text())
+            if profile:
+                self.profile_details.setText(json.dumps(profile, ensure_ascii=False, indent=2))
+        except Exception as e:
+            print(f"Error loading profile: {e}")
 
     def save_current_profile(self):
         """Сохраняет текущие настройки как профиль."""
         if not self.current_analysis:
             QMessageBox.warning(self, "Ошибка", "Сначала выполните анализ сайта")
             return
+        
+        try:
+            name, ok = QInputDialog.getText(self, "Имя профиля", "Введите имя профиля:")
+            if ok and name:
+                # Собираем текущие настройки
+                settings = {
+                    'url': self.current_analysis.get('url', ''),
+                    'analysis': self.current_analysis,
+                    'timestamp': datetime.now().isoformat()
+                }
 
-        name, ok = QInputDialog.getText(self, "Имя профиля", "Введите имя профиля:")
-        if ok and name:
-            # Собираем текущие настройки
-            settings = {
-                'url': self.current_analysis['url'],
-                'analysis': self.current_analysis,
-                'timestamp': datetime.now().isoformat()
-            }
+                # Добавляем настройки выбранных методов
+                methods = []
+                for i in range(self.methods_list.count()):
+                    item = self.methods_list.item(i)
+                    if item.checkState() == Qt.CheckState.Checked:
+                        methods.append({
+                            'id': item.data(Qt.ItemDataRole.UserRole),
+                            'name': item.text()
+                        })
+                settings['selected_methods'] = methods
 
-            # Добавляем настройки выбранных методов
-            methods = []
-            for i in range(self.methods_list.count()):
-                item = self.methods_list.item(i)
-                if item.checkState() == Qt.CheckState.Checked:
-                    methods.append({
-                        'id': item.data(Qt.ItemDataRole.UserRole),
-                        'name': item.text()
-                    })
-            settings['selected_methods'] = methods
-
-            self.profile_manager.save_profile(name, settings)
-            self.refresh_profiles_list()
-            self.status_bar.showMessage(f"Профиль '{name}' сохранен")
+                self.profile_manager.save_profile(name, settings)
+                self.refresh_profiles_list()
+                self.status_bar.showMessage(f"Профиль '{name}' сохранен")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить профиль: {str(e)}")
 
     def load_selected_profile(self):
         """Загружает выбранный профиль."""
-        current = self.profiles_list.currentItem()
-        if not current:
-            QMessageBox.warning(self, "Ошибка", "Выберите профиль")
-            return
+        try:
+            current = self.profiles_list.currentItem()
+            if not current:
+                QMessageBox.warning(self, "Ошибка", "Выберите профиль")
+                return
 
-        profile = self.profile_manager.load_profile(current.text())
-        if profile:
-            # Загружаем URL
-            self.url_input.setText(profile.get('url', ''))
+            profile = self.profile_manager.load_profile(current.text())
+            if profile:
+                # Загружаем URL
+                self.url_input.setText(profile.get('url', ''))
 
-            # Здесь можно автоматически запустить анализ
-            reply = QMessageBox.question(self, "Загрузить профиль",
-                                         "Запустить анализ сайта?",
-                                         QMessageBox.StandardButton.Yes |
-                                         QMessageBox.StandardButton.No)
-            if reply == QMessageBox.StandardButton.Yes:
-                self.start_analysis()
+                # Здесь можно автоматически запустить анализ
+                reply = QMessageBox.question(self, "Загрузить профиль",
+                                             "Запустить анализ сайта?",
+                                             QMessageBox.StandardButton.Yes |
+                                             QMessageBox.StandardButton.No)
+                if reply == QMessageBox.StandardButton.Yes:
+                    self.start_analysis()
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить профиль: {str(e)}")
 
     def delete_selected_profile(self):
         """Удаляет выбранный профиль."""
-        current = self.profiles_list.currentItem()
-        if not current:
-            QMessageBox.warning(self, "Ошибка", "Выберите профиль")
-            return
+        try:
+            current = self.profiles_list.currentItem()
+            if not current:
+                QMessageBox.warning(self, "Ошибка", "Выберите профиль")
+                return
 
-        reply = QMessageBox.question(self, "Удалить профиль",
-                                     f"Удалить профиль '{current.text()}'?",
-                                     QMessageBox.StandardButton.Yes |
-                                     QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.Yes:
-            self.profile_manager.delete_profile(current.text())
-            self.refresh_profiles_list()
-            self.profile_details.clear()
-            self.status_bar.showMessage(f"Профиль '{current.text()}' удален")
+            reply = QMessageBox.question(self, "Удалить профиль",
+                                         f"Удалить профиль '{current.text()}'?",
+                                         QMessageBox.StandardButton.Yes |
+                                         QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                self.profile_manager.delete_profile(current.text())
+                self.refresh_profiles_list()
+                self.profile_details.clear()
+                self.status_bar.showMessage(f"Профиль '{current.text()}' удален")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось удалить профиль: {str(e)}")
 
     def generate_chart(self):
         """Генерирует график на основе спарсенных данных."""
