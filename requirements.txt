@@ -9,3 +9,7 @@ pandas
 openpyxl
 Pillow
 pytesseract
+scrapy
+pytest
+pytest-qt
+responses

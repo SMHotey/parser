@@ -2,7 +2,6 @@ from PyQt6.QtCore import QObject, pyqtSignal
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-import time
 
 class SiteAnalyzer(QObject):
     finished = pyqtSignal(dict)
@@ -39,9 +38,15 @@ class SiteAnalyzer(QObject):
         if scripts:
             return True
         # Также проверим наличие event-атрибутов (onclick и т.п.)
-        for tag in soup.find_all(attrs={'onclick': True}):
+        if soup.find_all(attrs={'onclick': True}):
             return True
         return False
+
+    def _get_title(self, soup):
+        """Извлекает заголовок страницы."""
+        if soup.title:
+            return soup.title.string if soup.title.string else ''
+        return ''
 
     def _detect_api(self, soup):
         # Поиск ссылок на API в JS или meta-тегах

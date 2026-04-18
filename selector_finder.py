@@ -609,25 +609,40 @@ class SelectorFinder(QWidget):
         if not url:
             QMessageBox.warning(self, "Ошибка", "Введите URL")
             return
-
+        
         if not url.startswith('http'):
-            url = 'http://' + url
+            url = 'https://' + url
             self.url_input.setText(url)
-
-        self.status_label.setText(f"⏳ Загрузка {url}...")
-        QApplication.processEvents()
-
+        
+        self.status_label.setText("⏳ Загрузка...")
+        self.load_btn.setEnabled(False)
+        
         try:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                 'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept-Encoding': 'gzip, deflate',
                 'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1'
+                'Upgrade-Insecure-Requests': '1',
+                'Cache-Control': 'max-age=0'
             }
 
-            self.response = requests.get(url, headers=headers, timeout=15)
+            # Пробуем несколько попыток с разными настройками
+            session = requests.Session()
+            
+            # Попытка 1: HTTPS с таймаутом 30 сек
+            try:
+                self.response = session.get(url, headers=headers, timeout=30, allow_redirects=True)
+            except Exception as e:
+                # Попытка 2: HTTP если HTTPS не работает
+                if url.startswith('https://'):
+                    url_http = url.replace('https://', 'http://')
+                    self.status_label.setText("⏳ Пробуем HTTP...")
+                    self.response = session.get(url_http, headers=headers, timeout=30, allow_redirects=True)
+                else:
+                    raise
+            
             self.response.raise_for_status()
 
             self.soup = BeautifulSoup(self.response.text, 'lxml')
@@ -647,10 +662,13 @@ class SelectorFinder(QWidget):
 
         except requests.exceptions.ConnectionError:
             self.status_label.setText("❌ Ошибка подключения")
-            QMessageBox.critical(self, "Ошибка", "Не удалось подключиться к сайту")
+            QMessageBox.critical(self, "Ошибка", "Не удалось подключиться к сайту\nПроверьте URL и подключение к интернету")
         except requests.exceptions.Timeout:
             self.status_label.setText("❌ Таймаут")
-            QMessageBox.critical(self, "Ошибка", "Превышено время ожидания")
+            QMessageBox.critical(self, "Ошибка", "Сайт не отвечает. Попробуйте:\n1. Проверить URL\n2. Уменьшить количество одновременных запросов\n3. Использовать VPN")
+        except requests.exceptions.HTTPError as e:
+            self.status_label.setText(f"❌ HTTP ошибка: {e.response.status_code}")
+            QMessageBox.critical(self, "Ошибка", f"HTTP ошибка: {e.response.status_code}\n{e.response.reason}")
         except Exception as e:
             self.status_label.setText(f"❌ Ошибка: {str(e)[:50]}")
             QMessageBox.critical(self, "Ошибка загрузки", str(e))

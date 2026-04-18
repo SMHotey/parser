@@ -11,18 +11,20 @@ import time
 
 
 class StaticParser(QObject):
+    """Парсер статического HTML-контента."""
     data_ready = pyqtSignal(list)
     error = pyqtSignal(str)
 
-    def __init__(self, url, selector, headers=None):
+    def __init__(self, url, selector, headers=None, timeout=15):
         super().__init__()
         self.url = url
         self.selector = selector
-        self.headers = headers or {'User-Agent': 'Mozilla/5.0'}
+        self.headers = headers or {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        self.timeout = timeout
 
     def run(self):
         try:
-            response = requests.get(self.url, headers=self.headers, timeout=15)
+            response = requests.get(self.url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'lxml')
             elements = soup.select(self.selector)
@@ -33,6 +35,7 @@ class StaticParser(QObject):
 
 
 class DynamicParser(QObject):
+    """Парсер динамического контента с использованием Selenium."""
     data_ready = pyqtSignal(list)
     error = pyqtSignal(str)
 
@@ -48,9 +51,14 @@ class DynamicParser(QObject):
         try:
             options = webdriver.ChromeOptions()
             if self.headless:
-                options.add_argument('--headless')
+                options.add_argument('--headless=new')
+                options.add_argument('--disable-gpu')
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-extensions')
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_argument('--window-size=1920,1080')
+            
             service = Service(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=options)
             driver.get(self.url)
@@ -64,7 +72,10 @@ class DynamicParser(QObject):
             self.data_ready.emit(data)
         except Exception as e:
             if driver:
-                driver.quit()
+                try:
+                    driver.quit()
+                except:
+                    pass
             self.error.emit(str(e))
 
 
